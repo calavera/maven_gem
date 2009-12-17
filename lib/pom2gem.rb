@@ -1,9 +1,11 @@
 #!/usr/bin/env jruby
 require 'rexml/document'
+require 'rexml/xpath'
 require 'net/http'
 require 'rubygems'
 require 'yaml'
 require 'fileutils'
+require 'ostruct'
 
 module MavenGem
   module PomSpec
@@ -70,52 +72,20 @@ module MavenGem
 
         spec.platform = "java"
 
-        artifact = nil
-        group = nil
-        version = nil
-        maven_version = nil
-        titleized_classname = nil
+        pom = parse_pom(pom_doc, options)
+        spec.version = pom.version
 
-        puts "Processing POM" if options[:verbose]
-        pom_doc.elements.each("/project/*") do |element|
-          case element.name
-          when "artifactId"
-            artifact = element.text
-            titleized_classname = artifact.chomp('.rb').split('-').collect { |e| e.capitalize }.join
-          when "groupId"
-            group = element.text
-          when "version"
-            maven_version = element.text
-            version = MavenGem::PomSpec.maven_to_gem_version(maven_version)
-            spec.version = version
-          when "description"
-            spec.description = element.text
-          when "dependencies"
-            element.elements.each do |dependency|
-              dep_group = dependency.elements[1].text
-              dep_artifact = dependency.elements[2].text
-              dep_version = dependency.elements[3].text
+        group_dir = pom.group.gsub('.', '/')
 
-              new_dep = Gem::Dependency.new("#{dep_group}.#{dep_artifact}", "=#{dep_version}")
-              spec.dependencies << new_dep
-            end
-          when "developers"
-            element.elements.each("developer") do |developer|
-              spec.authors << developer.elements[2].text
-            end
-          when "url"
-            spec.homepage = element.text
-          end
-        end
-
-        group_dir = group.gsub('.', '/')
-        spec.name = "#{group}.#{artifact}"
-        spec.lib_files << "#{artifact}.rb"
-        gem_name = "#{spec.name}-#{version}"
+        spec.name = "#{pom.group}.#{pom.artifact}"
+        spec.lib_files << "#{pom.artifact}.rb"
+        gem_name = "#{spec.name}-#{pom.version}"
         gem_dir = "#{gem_name}.#{$$}"
-        remote_dir = "#{group_dir}/#{artifact}/#{version}"
+        remote_dir = "#{group_dir}/#{pom.artifact}/#{pom.version}"
         jar_file = "#{gem_name}.jar"
         spec.lib_files << jar_file
+        pom.dependencies.each {|dep| spec.dependencies << dep}
+        spec.authors = pom.authors
 
         puts "Using #{gem_dir} work dir" if options[:verbose]
         FileUtils.mkdir_p(gem_dir)
@@ -128,9 +98,9 @@ module MavenGem
         File.open("#{gem_dir}/lib/#{jar_file}", 'w') {|f| f.write(jar_contents)}
 
         ruby_file_contents = <<HEREDOC
-module #{titleized_classname}
-  VERSION = '#{version}'
-  MAVEN_VERSION = '#{maven_version}'   
+module #{pom.titleized_classname}
+  VERSION = '#{pom.version}'
+  MAVEN_VERSION = '#{pom.maven_version}'   
 end
 begin
   require 'java'
@@ -140,7 +110,7 @@ rescue LoadError
   raise
 end
 HEREDOC
-        ruby_file = "#{gem_dir}/lib/#{artifact}.rb"
+        ruby_file = "#{gem_dir}/lib/#{pom.artifact}.rb"
         puts "Writing #{ruby_file}" if options[:verbose]
         File.open(ruby_file, 'w') do |file|
           file.write(ruby_file_contents)
@@ -172,6 +142,44 @@ HEREDOC
 
     def self.maven_base_url
       "http://mirrors.ibiblio.org/pub/mirrors/maven2"
+    end
+
+    def self.parse_pom(pom_doc, options = {})
+      pom = OpenStruct.new
+
+      puts "Processing POM" if options[:verbose]
+      pom_doc.elements.each("/project/*") do |element|
+        case element.name
+        when "artifactId"
+          pom.artifact = element.text
+          pom.titleized_classname = pom.artifact.chomp('.rb').split('-').collect { |e| e.capitalize }.join
+        when "groupId"
+          pom.group = element.text
+        when "version"
+          pom.maven_version = element.text
+          pom.version = MavenGem::PomSpec.maven_to_gem_version(pom.maven_version)
+        when "description"
+          pom.description = element.text
+        when "dependencies"
+          pom.dependencies ||= []
+          element.elements.each do |dependency|
+            dep_group = REXML::XPath.first(dependency, 'groupId').text
+            dep_artifact = REXML::XPath.first(dependency, 'artifactId').text
+            dep_version = REXML::XPath.first(dependency, 'version').text
+
+            new_dep = Gem::Dependency.new("#{dep_group}.#{dep_artifact}", "=#{dep_version}")
+            pom.dependencies << new_dep
+          end
+        when "developers"
+          pom.authors ||= []
+          element.elements.each("developer") do |developer|
+            pom.authors << developer.elements[2].text
+          end
+        when "url"
+          pom.homepage = element.text
+        end
+      end
+      pom
     end
   end
 end
