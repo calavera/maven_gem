@@ -16,7 +16,7 @@ module MavenGem
     gem = if artifact
       # fetch pom and install
       url = MavenGem::PomSpec.maven_base_url + "/#{group}/#{artifact}/#{version}/#{artifact}-#{version}.pom"
-      PomSpec.from_url(url)
+      PomSpec.from_url(url, {:verbose => true})
     else
       if group =~ %r[^http://]
         PomSpec.from_url(group)

@@ -11,14 +11,18 @@ module MavenGem
   module PomSpec
     def self.from_file(filename, options = {})
       puts "Reading POM from #{filename}" if options[:verbose]
-      pom_doc = REXML::Document.new(File.read(filename))
+      
+      xml = clean_xml(File.read(filename))
+      pom_doc = REXML::Document.new(xml)
       from_doc(pom_doc, options)
     end
 
     def self.from_url(url, options = {})
       uri = URI.parse(url)
       puts "Retrieving POM from #{url}" if options[:verbose]
-      pom_doc = REXML::Document.new(Net::HTTP.get(uri))
+
+      xml = clean_xml(Net::HTTP.get(uri))
+      pom_doc = REXML::Document.new(xml)
       from_doc(pom_doc, options)
     end
     
@@ -163,6 +167,11 @@ HEREDOC
         when "dependencies"
           pom.dependencies ||= []
           element.elements.each do |dependency|
+            if REXML::XPath.first(dependency, 'optional') &&
+                REXML::XPath.first(dependency, 'optional').text == 'true'
+              next
+            end
+
             dep_group = REXML::XPath.first(dependency, 'groupId').text
             dep_artifact = REXML::XPath.first(dependency, 'artifactId').text
             dep_version = REXML::XPath.first(dependency, 'version').text
@@ -180,6 +189,11 @@ HEREDOC
         end
       end
       pom
+    end
+
+    private
+    def self.clean_xml(stream)
+      stream.gsub(/\<project[^>]+\>/, '<project>')
     end
   end
 end

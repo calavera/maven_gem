@@ -41,4 +41,12 @@ POM_FILE = %q{<project>
 
     assert_equal 'xerces.xercesImpl', pom.dependencies[0].name
   end
+
+  def test_from_file
+    gem = nil
+    assert_nothing_raised {
+      gem = MavenGem::PomSpec::from_file(File.dirname(__FILE__) + '/fixtures/ant.pom')
+    }
+    assert_equal 'ant.ant-1.6.5-java.gem', gem
+  end
 end
